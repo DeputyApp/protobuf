@@ -794,15 +794,20 @@ PHP_METHOD(Message, serializeToJsonString) {
   int options = 0;
   char buf[1024];
   zend_bool preserve_proto_fieldnames = false;
+  zend_bool emit_defaults = false;
   upb_Status status;
 
-  if (zend_parse_parameters(ZEND_NUM_ARGS(), "|b",
-                            &preserve_proto_fieldnames) == FAILURE) {
+  if (zend_parse_parameters(ZEND_NUM_ARGS(), "|bb",
+                            &preserve_proto_fieldnames, &emit_defaults) == FAILURE) {
     return;
   }
 
   if (preserve_proto_fieldnames) {
     options |= upb_JsonEncode_UseProtoNames;
+  }
+
+  if (emit_defaults) {
+    options |= upb_JsonEncode_EmitDefaults;
   }
 
   upb_Status_Clear(&status);
