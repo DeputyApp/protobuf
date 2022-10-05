@@ -32,12 +32,15 @@ package com.google.protobuf;
 
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.fail;
 
 import com.google.protobuf.Descriptors.Descriptor;
 import com.google.protobuf.Descriptors.EnumDescriptor;
 import com.google.protobuf.Descriptors.EnumValueDescriptor;
 import com.google.protobuf.Descriptors.FieldDescriptor;
 import map_test.MapTestProto.BizarroTestMap;
+import map_test.MapTestProto.MapContainer;
 import map_test.MapTestProto.ReservedAsMapField;
 import map_test.MapTestProto.ReservedAsMapFieldWithEnumValue;
 import map_test.MapTestProto.TestMap;
@@ -50,6 +53,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -465,6 +469,37 @@ public class MapTest {
   }
 
   @Test
+  public void testPutAllWithNullStringValue() throws Exception {
+    TestMap.Builder sourceBuilder = TestMap.newBuilder();
+
+    // order preserving map used here to help test rollback
+    Map<Integer, String> data = new TreeMap<>();
+    data.put(7, "foo");
+    data.put(8, "bar");
+    data.put(9, null);
+    try {
+      sourceBuilder.putAllInt32ToStringField(data);
+      fail("allowed null string value");
+    } catch (NullPointerException expected) {
+      // Verify rollback of previously added values.
+      // They all go in or none do.
+      assertThat(sourceBuilder.getInt32ToStringFieldMap()).isEmpty();
+    }
+  }
+
+  @Test
+  public void testPutNullStringValue() throws Exception {
+    TestMap.Builder sourceBuilder = TestMap.newBuilder();
+
+    try {
+      sourceBuilder.putInt32ToStringField(8, null);
+      fail("allowed null string value");
+    } catch (NullPointerException expected) {
+      assertNotNull(expected.getMessage());
+    }
+  }
+
+  @Test
   public void testPutAllForUnknownEnumValues() throws Exception {
     TestMap source =
         TestMap.newBuilder()
@@ -546,21 +581,21 @@ public class MapTest {
     setMapValuesUsingAccessors(builder);
     TestMap message = builder.build();
     assertThat(message.toByteString().size()).isEqualTo(message.getSerializedSize());
-    message = TestMap.parser().parseFrom(message.toByteString());
+    message = TestMap.parseFrom(message.toByteString());
     assertMapValuesSet(message);
 
     builder = message.toBuilder();
     updateMapValuesUsingAccessors(builder);
     message = builder.build();
     assertThat(message.toByteString().size()).isEqualTo(message.getSerializedSize());
-    message = TestMap.parser().parseFrom(message.toByteString());
+    message = TestMap.parseFrom(message.toByteString());
     assertMapValuesUpdated(message);
 
     builder = message.toBuilder();
     builder.clear();
     message = builder.build();
     assertThat(message.toByteString().size()).isEqualTo(message.getSerializedSize());
-    message = TestMap.parser().parseFrom(message.toByteString());
+    message = TestMap.parseFrom(message.toByteString());
     assertMapValuesCleared(message);
   }
 
@@ -569,7 +604,7 @@ public class MapTest {
     CodedOutputStream output = CodedOutputStream.newInstance(byteArrayOutputStream);
     bizarroMap.writeTo(output);
     output.flush();
-    return TestMap.parser().parseFrom(ByteString.copyFrom(byteArrayOutputStream.toByteArray()));
+    return TestMap.parseFrom(ByteString.copyFrom(byteArrayOutputStream.toByteArray()));
   }
 
   @Test
@@ -958,6 +993,7 @@ public class MapTest {
   }
 
   @Test
+  @SuppressWarnings("ProtoNewBuilderMergeFrom")
   public void testUnknownEnumValues() throws Exception {
     TestMap.Builder builder =
         TestMap.newBuilder()
@@ -1550,5 +1586,20 @@ public class MapTest {
     }
 
     assertThat(builder.build().toByteArray()).isEqualTo(new byte[0]);
+  }
+
+  @Test
+  // https://github.com/protocolbuffers/protobuf/issues/9785
+  public void testContainer() {
+    FieldDescriptor field = MapContainer.getDescriptor().findFieldByName("my_map");
+    Descriptor entryDescriptor = field.getMessageType();
+    FieldDescriptor valueDescriptor = entryDescriptor.findFieldByName("value");
+    Message.Builder builder = MapContainer.newBuilder().newBuilderForField(field);
+    try {
+      builder.setField(valueDescriptor, null);
+      fail("Allowed null field value");
+    } catch (NullPointerException expected) {
+      assertThat(expected).hasMessageThat().isNotNull();
+    }
   }
 }

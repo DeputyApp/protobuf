@@ -70,8 +70,8 @@
 #include <new>
 #include <unordered_map>
 
-#include <google/protobuf/descriptor.pb.h>
 #include <google/protobuf/descriptor.h>
+#include <google/protobuf/descriptor.pb.h>
 #include <google/protobuf/generated_message_reflection.h>
 #include <google/protobuf/generated_message_util.h>
 #include <google/protobuf/unknown_field_set.h>
@@ -85,7 +85,8 @@
 #include <google/protobuf/repeated_field.h>
 #include <google/protobuf/wire_format.h>
 
-#include <google/protobuf/port_def.inc>  // NOLINT
+// Must be included last.
+#include <google/protobuf/port_def.inc>
 
 namespace google {
 namespace protobuf {
@@ -99,14 +100,6 @@ using internal::ArenaStringPtr;
 
 // ===================================================================
 // Some helper tables and functions...
-
-class DynamicMessageReflectionHelper {
- public:
-  static bool IsLazyField(const Reflection* reflection,
-                          const FieldDescriptor* field) {
-    return reflection->IsLazyField(field);
-  }
-};
 
 namespace {
 
@@ -232,7 +225,7 @@ class DynamicMessage : public Message {
   // This should only be used by GetPrototypeNoLock() to avoid dead lock.
   DynamicMessage(DynamicMessageFactory::TypeInfo* type_info, bool lock_factory);
 
-  ~DynamicMessage();
+  ~DynamicMessage() override;
 
   // Called on the prototype after construction to initialize message fields.
   // Cross linking the default instances allows for fast reflection access of
@@ -246,7 +239,6 @@ class DynamicMessage : public Message {
 
   // implements Message ----------------------------------------------
 
-  Message* New() const override;
   Message* New(Arena* arena) const override;
 
   int GetCachedSize() const override;
@@ -277,13 +269,6 @@ class DynamicMessage : public Message {
   friend class DynamicMessageFactory;
 
   bool is_prototype() const;
-
-  inline int OffsetValue(int v, FieldDescriptor::Type type) const {
-    if (type == FieldDescriptor::TYPE_MESSAGE) {
-      return v & ~0x1u;
-    }
-    return v;
-  }
 
   inline void* OffsetToPointer(int offset) {
     return reinterpret_cast<uint8_t*>(this) + offset;
@@ -355,24 +340,21 @@ DynamicMessage::DynamicMessage(DynamicMessageFactory::TypeInfo* type_info,
   SharedCtor(lock_factory);
 }
 
-void* DynamicMessage::MutableRaw(int i) {
-  return OffsetToPointer(
-      OffsetValue(type_info_->offsets[i], type_info_->type->field(i)->type()));
+inline void* DynamicMessage::MutableRaw(int i) {
+  return OffsetToPointer(type_info_->offsets[i]);
 }
-void* DynamicMessage::MutableExtensionsRaw() {
+inline void* DynamicMessage::MutableExtensionsRaw() {
   return OffsetToPointer(type_info_->extensions_offset);
 }
-void* DynamicMessage::MutableWeakFieldMapRaw() {
+inline void* DynamicMessage::MutableWeakFieldMapRaw() {
   return OffsetToPointer(type_info_->weak_field_map_offset);
 }
-void* DynamicMessage::MutableOneofCaseRaw(int i) {
+inline void* DynamicMessage::MutableOneofCaseRaw(int i) {
   return OffsetToPointer(type_info_->oneof_case_offset + sizeof(uint32_t) * i);
 }
-void* DynamicMessage::MutableOneofFieldRaw(const FieldDescriptor* f) {
-  return OffsetToPointer(
-      OffsetValue(type_info_->offsets[type_info_->type->field_count() +
-                                      f->containing_oneof()->index()],
-                  f->type()));
+inline void* DynamicMessage::MutableOneofFieldRaw(const FieldDescriptor* f) {
+  return OffsetToPointer(type_info_->offsets[type_info_->type->field_count() +
+                                             f->containing_oneof()->index()]);
 }
 
 void DynamicMessage::SharedCtor(bool lock_factory) {
@@ -434,12 +416,8 @@ void DynamicMessage::SharedCtor(bool lock_factory) {
           default:  // TODO(kenton):  Support other string reps.
           case FieldOptions::STRING:
             if (!field->is_repeated()) {
-              const std::string* default_value =
-                  field->default_value_string().empty()
-                      ? &internal::GetEmptyStringAlreadyInited()
-                      : nullptr;
               ArenaStringPtr* asp = new (field_ptr) ArenaStringPtr();
-              asp->UnsafeSetDefault(default_value);
+              asp->InitDefault();
             } else {
               new (field_ptr)
                   RepeatedPtrField<std::string>(GetArenaForAllocation());
@@ -450,7 +428,7 @@ void DynamicMessage::SharedCtor(bool lock_factory) {
 
       case FieldDescriptor::CPPTYPE_MESSAGE: {
         if (!field->is_repeated()) {
-          new (field_ptr) Message*(NULL);
+          new (field_ptr) Message*(nullptr);
         } else {
           if (IsMapFieldInApi(field)) {
             // We need to lock in most cases to avoid data racing. Only not lock
@@ -499,7 +477,7 @@ void DynamicMessage::SharedCtor(bool lock_factory) {
 
 bool DynamicMessage::is_prototype() const {
   return type_info_->prototype == this ||
-         // If type_info_->prototype is NULL, then we must be constructing
+         // If type_info_->prototype is nullptr, then we must be constructing
          // the prototype now, which means we must be the prototype.
          type_info_->prototype == nullptr;
 }
@@ -540,13 +518,7 @@ DynamicMessage::~DynamicMessage() {
           switch (field->options().ctype()) {
             default:
             case FieldOptions::STRING: {
-              // Oneof string fields are never set as a default instance.
-              // We just need to pass some arbitrary default string to make it
-              // work. This allows us to not have the real default accessible
-              // from reflection.
-              const std::string* default_value = nullptr;
-              reinterpret_cast<ArenaStringPtr*>(field_ptr)->Destroy(
-                  default_value, NULL);
+              reinterpret_cast<ArenaStringPtr*>(field_ptr)->Destroy();
               break;
             }
           }
@@ -600,20 +572,14 @@ DynamicMessage::~DynamicMessage() {
       switch (field->options().ctype()) {
         default:  // TODO(kenton):  Support other string reps.
         case FieldOptions::STRING: {
-          const std::string* default_value =
-              reinterpret_cast<const ArenaStringPtr*>(
-                  type_info_->prototype->OffsetToPointer(
-                      type_info_->offsets[i]))
-                  ->GetPointer();
-          reinterpret_cast<ArenaStringPtr*>(field_ptr)->Destroy(default_value,
-                                                                NULL);
+          reinterpret_cast<ArenaStringPtr*>(field_ptr)->Destroy();
           break;
         }
       }
     } else if (field->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE) {
           if (!is_prototype()) {
         Message* message = *reinterpret_cast<Message**>(field_ptr);
-        if (message != NULL) {
+        if (message != nullptr) {
           delete message;
         }
       }
@@ -645,10 +611,8 @@ void DynamicMessage::CrossLinkPrototypes() {
   }
 }
 
-Message* DynamicMessage::New() const { return New(NULL); }
-
 Message* DynamicMessage::New(Arena* arena) const {
-  if (arena != NULL) {
+  if (arena != nullptr) {
     void* new_base = Arena::CreateArray<char>(arena, type_info_->size);
     memset(new_base, 0, type_info_->size);
     return new (new_base) DynamicMessage(type_info_, arena);
@@ -701,7 +665,7 @@ const Message* DynamicMessageFactory::GetPrototypeNoLock(
   }
 
   const TypeInfo** target = &prototypes_[type];
-  if (*target != NULL) {
+  if (*target != nullptr) {
     // Already exists.
     return (*target)->prototype;
   }
@@ -710,7 +674,7 @@ const Message* DynamicMessageFactory::GetPrototypeNoLock(
   *target = type_info;
 
   type_info->type = type;
-  type_info->pool = (pool_ == NULL) ? type->file()->pool() : pool_;
+  type_info->pool = (pool_ == nullptr) ? type->file()->pool() : pool_;
   type_info->factory = this;
 
   // We need to construct all the structures passed to Reflection's constructor.
@@ -747,9 +711,9 @@ const Message* DynamicMessageFactory::GetPrototypeNoLock(
         // hasbits.
         type_info->has_bits_offset = size;
         uint32_t* has_bits_indices = new uint32_t[type->field_count()];
-        for (int i = 0; i < type->field_count(); i++) {
+        for (int j = 0; j < type->field_count(); j++) {
           // Initialize to -1, fields that need a hasbit will overwrite.
-          has_bits_indices[i] = static_cast<uint32_t>(-1);
+          has_bits_indices[j] = static_cast<uint32_t>(-1);
         }
         type_info->has_bits_indices.reset(has_bits_indices);
       }

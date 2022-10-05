@@ -41,25 +41,26 @@
 #include <google/protobuf/stubs/casts.h>
 #include <google/protobuf/stubs/logging.h>
 #include <google/protobuf/stubs/common.h>
-#include <google/protobuf/descriptor.pb.h>
-#include <google/protobuf/parse_context.h>
-#include <google/protobuf/reflection_internal.h>
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
+#include <google/protobuf/stubs/strutil.h>
 #include <google/protobuf/descriptor.h>
+#include <google/protobuf/descriptor.pb.h>
 #include <google/protobuf/generated_message_reflection.h>
 #include <google/protobuf/generated_message_util.h>
 #include <google/protobuf/map_field.h>
 #include <google/protobuf/map_field_inl.h>
+#include <google/protobuf/parse_context.h>
+#include <google/protobuf/reflection_internal.h>
 #include <google/protobuf/reflection_ops.h>
 #include <google/protobuf/unknown_field_set.h>
 #include <google/protobuf/wire_format.h>
 #include <google/protobuf/wire_format_lite.h>
-#include <google/protobuf/stubs/strutil.h>
 #include <google/protobuf/stubs/map_util.h>
 #include <google/protobuf/stubs/stl_util.h>
 #include <google/protobuf/stubs/hash.h>
 
+// Must be included last.
 #include <google/protobuf/port_def.inc>
 
 namespace google {
@@ -83,11 +84,11 @@ void Message::MergeFrom(const Message& from) {
   auto* class_from = from.GetClassData();
   auto* merge_to_from = class_to ? class_to->merge_to_from : nullptr;
   if (class_to == nullptr || class_to != class_from) {
-    merge_to_from = [](Message* to, const Message& from) {
-      ReflectionOps::Merge(from, to);
+    merge_to_from = [](Message& to, const Message& from) {
+      ReflectionOps::Merge(from, &to);
     };
   }
-  merge_to_from(this, from);
+  merge_to_from(*this, from);
 }
 
 void Message::CheckTypeAndMergeFrom(const MessageLite& other) {
@@ -110,25 +111,28 @@ void Message::CopyFrom(const Message& from) {
         << ", "
            "from: "
         << from.GetDescriptor()->full_name();
-    copy_to_from = [](Message* to, const Message& from) {
-      ReflectionOps::Copy(from, to);
+    copy_to_from = [](Message& to, const Message& from) {
+      ReflectionOps::Copy(from, &to);
     };
   }
-  copy_to_from(this, from);
+  copy_to_from(*this, from);
 }
 
-void Message::CopyWithSizeCheck(Message* to, const Message& from) {
+void Message::CopyWithSourceCheck(Message& to, const Message& from) {
 #ifndef NDEBUG
-  size_t from_size = from.ByteSizeLong();
+  FailIfCopyFromDescendant(to, from);
 #endif
-  to->Clear();
-#ifndef NDEBUG
-  GOOGLE_CHECK_EQ(from_size, from.ByteSizeLong())
-      << "Source of CopyFrom changed when clearing target.  Either "
-         "source is a nested message in target (not allowed), or "
-         "another thread is modifying the source.";
-#endif
-  to->GetClassData()->merge_to_from(to, from);
+  to.Clear();
+  to.GetClassData()->merge_to_from(to, from);
+}
+
+void Message::FailIfCopyFromDescendant(Message& to, const Message& from) {
+  auto* arena = to.GetArenaForAllocation();
+  bool same_message_owned_arena = to.GetOwningArena() == nullptr &&
+                                  arena != nullptr &&
+                                  arena == from.GetOwningArena();
+  GOOGLE_CHECK(!same_message_owned_arena && !internal::IsDescendant(to, from))
+      << "Source of CopyFrom cannot be a descendant of the target.";
 }
 
 std::string Message::GetTypeName() const {
@@ -210,84 +214,6 @@ uint64_t Message::GetInvariantPerBuild(uint64_t salt) {
 }
 
 // =============================================================================
-// ZeroFieldsBase
-
-namespace internal {
-
-void ZeroFieldsBase::Clear() {
-  _internal_metadata_.Clear<UnknownFieldSet>();  //
-}
-
-ZeroFieldsBase::~ZeroFieldsBase() {
-  if (GetArenaForAllocation() != nullptr) return;
-  _internal_metadata_.Delete<UnknownFieldSet>();
-}
-
-size_t ZeroFieldsBase::ByteSizeLong() const {
-  return MaybeComputeUnknownFieldsSize(0, &_cached_size_);
-}
-
-const char* ZeroFieldsBase::_InternalParse(const char* ptr,
-                                           internal::ParseContext* ctx) {
-#define CHK_(x)                       \
-  if (PROTOBUF_PREDICT_FALSE(!(x))) { \
-    goto failure;                     \
-  }
-
-  while (!ctx->Done(&ptr)) {
-    uint32_t tag;
-    ptr = internal::ReadTag(ptr, &tag);
-    if ((tag == 0) || ((tag & 7) == 4)) {
-      CHK_(ptr);
-      ctx->SetLastTag(tag);
-      goto message_done;
-    }
-    ptr = UnknownFieldParse(
-        tag, _internal_metadata_.mutable_unknown_fields<UnknownFieldSet>(), ptr,
-        ctx);
-    CHK_(ptr);
-  }  // while
-message_done:
-  return ptr;
-failure:
-  ptr = nullptr;
-  goto message_done;
-#undef CHK_
-}
-
-::uint8_t* ZeroFieldsBase::_InternalSerialize(
-    ::uint8_t* target, io::EpsCopyOutputStream* stream) const {
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    target = internal::WireFormat::InternalSerializeUnknownFieldsToArray(
-        _internal_metadata_.unknown_fields<UnknownFieldSet>(
-            UnknownFieldSet::default_instance),
-        target, stream);
-  }
-  return target;
-}
-
-void ZeroFieldsBase::MergeImpl(Message* to_param, const Message& from_param) {
-  auto* to = static_cast<ZeroFieldsBase*>(to_param);
-  const auto* from = static_cast<const ZeroFieldsBase*>(&from_param);
-  GOOGLE_DCHECK_NE(from, to);
-  to->_internal_metadata_.MergeFrom<UnknownFieldSet>(from->_internal_metadata_);
-}
-
-void ZeroFieldsBase::CopyImpl(Message* to_param, const Message& from_param) {
-  auto* to = static_cast<ZeroFieldsBase*>(to_param);
-  const auto* from = static_cast<const ZeroFieldsBase*>(&from_param);
-  if (from == to) return;
-  to->_internal_metadata_.Clear<UnknownFieldSet>();
-  to->_internal_metadata_.MergeFrom<UnknownFieldSet>(from->_internal_metadata_);
-}
-
-void ZeroFieldsBase::InternalSwap(ZeroFieldsBase* other) {
-  _internal_metadata_.Swap<UnknownFieldSet>(&other->_internal_metadata_);
-}
-
-}  // namespace internal
-
-// =============================================================================
 // MessageFactory
 
 MessageFactory::~MessageFactory() {}
@@ -353,35 +279,35 @@ const Message* GeneratedMessageFactory::GetPrototype(const Descriptor* type) {
   {
     ReaderMutexLock lock(&mutex_);
     const Message* result = FindPtrOrNull(type_map_, type);
-    if (result != NULL) return result;
+    if (result != nullptr) return result;
   }
 
   // If the type is not in the generated pool, then we can't possibly handle
   // it.
-  if (type->file()->pool() != DescriptorPool::generated_pool()) return NULL;
+  if (type->file()->pool() != DescriptorPool::generated_pool()) return nullptr;
 
   // Apparently the file hasn't been registered yet.  Let's do that now.
   const internal::DescriptorTable* registration_data =
       FindPtrOrNull(file_map_, type->file()->name().c_str());
-  if (registration_data == NULL) {
+  if (registration_data == nullptr) {
     GOOGLE_LOG(DFATAL) << "File appears to be in generated pool but wasn't "
                    "registered: "
                 << type->file()->name();
-    return NULL;
+    return nullptr;
   }
 
   WriterMutexLock lock(&mutex_);
 
   // Check if another thread preempted us.
   const Message* result = FindPtrOrNull(type_map_, type);
-  if (result == NULL) {
+  if (result == nullptr) {
     // Nope.  OK, register everything.
     internal::RegisterFileLevelMetadata(registration_data);
     // Should be here now.
     result = FindPtrOrNull(type_map_, type);
   }
 
-  if (result == NULL) {
+  if (result == nullptr) {
     GOOGLE_LOG(DFATAL) << "Type appears to be in generated pool but wasn't "
                 << "registered: " << type->full_name();
   }
@@ -445,7 +371,7 @@ const internal::RepeatedFieldAccessor* Reflection::RepeatedFieldAccessor(
       }
   }
   GOOGLE_LOG(FATAL) << "Should not reach here.";
-  return NULL;
+  return nullptr;
 }
 
 namespace internal {

@@ -49,7 +49,7 @@ import org.junit.runners.JUnit4;
 @RunWith(JUnit4.class)
 public class CheckUtf8Test {
 
-  private static final String UTF8_BYTE_STRING_TEXT = "some text";
+  private static final String UTF8_BYTE_STRING_TEXT = "some text π \uD83D\uDE00";
   private static final ByteString UTF8_BYTE_STRING = ByteString.copyFromUtf8(UTF8_BYTE_STRING_TEXT);
   private static final ByteString NON_UTF8_BYTE_STRING =
       ByteString.copyFrom(new byte[] {(byte) 0x80}); // A lone continuation byte.
@@ -64,8 +64,7 @@ public class CheckUtf8Test {
   public void testParseRequiredStringWithGoodUtf8() throws Exception {
     ByteString serialized =
         BytesWrapper.newBuilder().setReq(UTF8_BYTE_STRING).build().toByteString();
-    assertThat(StringWrapper.parser().parseFrom(serialized).getReq())
-        .isEqualTo(UTF8_BYTE_STRING_TEXT);
+    assertThat(StringWrapper.parseFrom(serialized).getReq()).isEqualTo(UTF8_BYTE_STRING_TEXT);
   }
 
   @Test

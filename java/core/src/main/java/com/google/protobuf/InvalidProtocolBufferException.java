@@ -33,8 +33,8 @@ package com.google.protobuf;
 import java.io.IOException;
 
 /**
- * Thrown when a protocol message being parsed is invalid in some way, e.g. it contains a malformed
- * varint or a negative byte length.
+ * Thrown when a protocol message being parsed is invalid in some way. For instance,
+ * it contains a malformed varint or a negative byte length.
  *
  * @author kenton@google.com Kenton Varda
  */
@@ -43,15 +43,23 @@ public class InvalidProtocolBufferException extends IOException {
   private MessageLite unfinishedMessage = null;
   private boolean wasThrownFromInputStream;
 
-  public InvalidProtocolBufferException(final String description) {
+  public InvalidProtocolBufferException(String description) {
     super(description);
+  }
+
+  public InvalidProtocolBufferException(Exception e) {
+    super(e.getMessage(), e);
+  }
+
+  public InvalidProtocolBufferException(String description, Exception e) {
+    super(description, e);
   }
 
   public InvalidProtocolBufferException(IOException e) {
     super(e.getMessage(), e);
   }
 
-  public InvalidProtocolBufferException(final String description, IOException e) {
+  public InvalidProtocolBufferException(String description, IOException e) {
     super(description, e);
   }
 
@@ -134,7 +142,7 @@ public class InvalidProtocolBufferException extends IOException {
     return new InvalidWireTypeException("Protocol message tag had invalid wire type.");
   }
 
-  /** Exception indicating that and unexpected wire type was encountered for a field. */
+  /** Exception indicating that an unexpected wire type was encountered for a field. */
   @ExperimentalApi
   public static class InvalidWireTypeException extends InvalidProtocolBufferException {
     private static final long serialVersionUID = 3283890091615336259L;

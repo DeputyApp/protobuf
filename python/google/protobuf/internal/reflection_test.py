@@ -1,6 +1,4 @@
-#! /usr/bin/env python
 # -*- coding: utf-8 -*-
-#
 # Protocol Buffers - Google's data interchange format
 # Copyright 2008 Google Inc.  All rights reserved.
 # https://developers.google.com/protocol-buffers/
@@ -38,14 +36,10 @@ pure-Python protocol compiler.
 import copy
 import gc
 import operator
-import six
 import struct
+import sys
 import warnings
-
-try:
-  import unittest2 as unittest  #PY26
-except ImportError:
-  import unittest
+import unittest
 
 from google.protobuf import unittest_import_pb2
 from google.protobuf import unittest_mset_pb2
@@ -65,10 +59,6 @@ from google.protobuf.internal import test_util
 from google.protobuf.internal import testing_refleaks
 from google.protobuf.internal import decoder
 from google.protobuf.internal import _parameterized
-
-
-if six.PY3:
-  long = int  # pylint: disable=redefined-builtin,invalid-name
 
 
 warnings.simplefilter('error', DeprecationWarning)
@@ -387,7 +377,8 @@ class ReflectionTest(unittest.TestCase):
     self.assertRaises(TypeError, setattr, proto, 'optional_float', 'foo')
     self.assertRaises(TypeError, setattr, proto, 'optional_double', 'foo')
     # TODO(jieluo): Fix type checking difference for python and c extension
-    if api_implementation.Type() == 'python':
+    if (api_implementation.Type() == 'python' or
+        (sys.version_info.major, sys.version_info.minor) >= (3, 10)):
       self.assertRaises(TypeError, setattr, proto, 'optional_bool', 1.1)
     else:
       proto.optional_bool = 1.1
@@ -411,7 +402,7 @@ class ReflectionTest(unittest.TestCase):
     TestGetAndDeserialize('optional_int32', 1, int)
     TestGetAndDeserialize('optional_int32', 1 << 30, int)
     TestGetAndDeserialize('optional_uint32', 1 << 30, int)
-    integer_64 = long
+    integer_64 = int
     if struct.calcsize('L') == 4:
       # Python only has signed ints, so 32-bit python can't fit an uint32
       # in an int.
@@ -438,7 +429,7 @@ class ReflectionTest(unittest.TestCase):
       pb.optional_uint64 = '2'
 
     # The exact error should propagate with a poorly written custom integer.
-    with self.assertRaisesRegexp(RuntimeError, 'my_error'):
+    with self.assertRaisesRegex(RuntimeError, 'my_error'):
       pb.optional_uint64 = test_util.NonStandardInteger(5, 'my_error')
 
   def assetIntegerBoundsChecking(self, integer_fn, message_module):
@@ -852,14 +843,14 @@ class ReflectionTest(unittest.TestCase):
                       setattr, proto, 'optional_bytes', u'unicode object')
 
     # Check that the default value is of python's 'unicode' type.
-    self.assertEqual(type(proto.optional_string), six.text_type)
+    self.assertEqual(type(proto.optional_string), str)
 
-    proto.optional_string = six.text_type('Testing')
+    proto.optional_string = str('Testing')
     self.assertEqual(proto.optional_string, str('Testing'))
 
     # Assign a value of type 'str' which can be encoded in UTF-8.
     proto.optional_string = str('Testing')
-    self.assertEqual(proto.optional_string, six.text_type('Testing'))
+    self.assertEqual(proto.optional_string, str('Testing'))
 
     # Try to assign a 'bytes' object which contains non-UTF-8.
     self.assertRaises(ValueError,
@@ -874,8 +865,7 @@ class ReflectionTest(unittest.TestCase):
 
   def testBytesInTextFormat(self, message_module):
     proto = message_module.TestAllTypes(optional_bytes=b'\x00\x7f\x80\xff')
-    self.assertEqual(u'optional_bytes: "\\000\\177\\200\\377"\n',
-                     six.text_type(proto))
+    self.assertEqual(u'optional_bytes: "\\000\\177\\200\\377"\n', str(proto))
 
   def testEmptyNestedMessage(self, message_module):
     proto = message_module.TestAllTypes()
@@ -1508,7 +1498,9 @@ class Proto2ReflectionTest(unittest.TestCase):
         options=descriptor_pb2.MessageOptions(),
         # pylint: disable=protected-access
         create_key=descriptor._internal_create_key)
-    class MyProtoClass(six.with_metaclass(reflection.GeneratedProtocolMessageType, message.Message)):
+
+    class MyProtoClass(
+        message.Message, metaclass=reflection.GeneratedProtocolMessageType):
       DESCRIPTOR = mydescriptor
     myproto_instance = MyProtoClass()
     self.assertEqual(0, myproto_instance.foo_field)
@@ -1556,8 +1548,8 @@ class Proto2ReflectionTest(unittest.TestCase):
     self.assertTrue('price' in desc.fields_by_name)
     self.assertTrue('owners' in desc.fields_by_name)
 
-    class CarMessage(six.with_metaclass(reflection.GeneratedProtocolMessageType,
-                                        message.Message)):
+    class CarMessage(
+        message.Message, metaclass=reflection.GeneratedProtocolMessageType):
       DESCRIPTOR = desc
 
     prius = CarMessage()
@@ -1941,17 +1933,17 @@ class Proto2ReflectionTest(unittest.TestCase):
 
   def testDisconnectingInOneof(self):
     m = unittest_pb2.TestOneof2()  # This message has two messages in a oneof.
-    m.foo_message.qux_int = 5
+    m.foo_message.moo_int = 5
     sub_message = m.foo_message
     # Accessing another message's field does not clear the first one
-    self.assertEqual(m.foo_lazy_message.qux_int, 0)
-    self.assertEqual(m.foo_message.qux_int, 5)
+    self.assertEqual(m.foo_lazy_message.moo_int, 0)
+    self.assertEqual(m.foo_message.moo_int, 5)
     # But mutating another message in the oneof detaches the first one.
-    m.foo_lazy_message.qux_int = 6
-    self.assertEqual(m.foo_message.qux_int, 0)
+    m.foo_lazy_message.moo_int = 6
+    self.assertEqual(m.foo_message.moo_int, 0)
     # The reference we got above was detached and is still valid.
-    self.assertEqual(sub_message.qux_int, 5)
-    sub_message.qux_int = 7
+    self.assertEqual(sub_message.moo_int, 5)
+    sub_message.moo_int = 7
 
   def assertInitialized(self, proto):
     self.assertTrue(proto.IsInitialized())
@@ -2028,7 +2020,7 @@ class Proto2ReflectionTest(unittest.TestCase):
     self.assertRaises(TypeError, proto.IsInitialized, 1, 2, 3)
 
   @unittest.skipIf(
-      api_implementation.Type() != 'cpp' or api_implementation.Version() != 2,
+      api_implementation.Type() == 'python',
       'Errors are only available from the most recent C++ implementation.')
   def testFileDescriptorErrors(self):
     file_name = 'test_file_descriptor_errors.proto'
@@ -2094,7 +2086,7 @@ class Proto2ReflectionTest(unittest.TestCase):
     bytes_read = message2.MergeFromString(raw.item[0].message)
     self.assertEqual(len(raw.item[0].message), bytes_read)
 
-    self.assertEqual(type(message2.str), six.text_type)
+    self.assertEqual(type(message2.str), str)
     self.assertEqual(message2.str, test_utf8)
 
     # The pure Python API throws an exception on MergeFromString(),
@@ -3233,7 +3225,7 @@ class OptionsTest(unittest.TestCase):
 class ClassAPITest(unittest.TestCase):
 
   @unittest.skipIf(
-      api_implementation.Type() == 'cpp' and api_implementation.Version() == 2,
+      api_implementation.Type() != 'python',
       'C++ implementation requires a call to MakeDescriptor()')
   @testing_refleaks.SkipReferenceLeakChecker('MakeClass is not repeatable')
   def testMakeClassWithNestedDescriptor(self):
@@ -3340,7 +3332,8 @@ class ClassAPITest(unittest.TestCase):
     msg_descriptor = descriptor.MakeDescriptor(
         file_descriptor.message_type[0])
 
-    class MessageClass(six.with_metaclass(reflection.GeneratedProtocolMessageType, message.Message)):
+    class MessageClass(
+        message.Message, metaclass=reflection.GeneratedProtocolMessageType):
       DESCRIPTOR = msg_descriptor
     msg = MessageClass()
     msg_str = (

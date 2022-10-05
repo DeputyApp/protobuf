@@ -43,10 +43,10 @@ from google.protobuf.internal import api_implementation
 from google.protobuf import descriptor_pool
 from google.protobuf import message
 
-if api_implementation.Type() == 'cpp':
-  from google.protobuf.pyext import cpp_message as message_impl
-else:
+if api_implementation.Type() == 'python':
   from google.protobuf.internal import python_message as message_impl
+else:
+  from google.protobuf.pyext import cpp_message as message_impl  # pylint: disable=g-import-not-at-top
 
 
 # The type of all Message classes.
@@ -98,8 +98,6 @@ class MessageFactory(object):
       A class describing the passed in descriptor.
     """
     descriptor_name = descriptor.name
-    if str is bytes:  # PY2
-      descriptor_name = descriptor.name.encode('ascii', 'ignore')
     result_class = _GENERATED_PROTOCOL_MESSAGE_TYPE(
         descriptor_name,
         (message.Message,),
@@ -120,6 +118,8 @@ class MessageFactory(object):
         self.GetPrototype(extension.containing_type)
       extended_class = self._classes[extension.containing_type]
       extended_class.RegisterExtension(extension)
+      if extension.message_type:
+        self.GetPrototype(extension.message_type)
     return result_class
 
   def GetMessages(self, files):
@@ -156,6 +156,8 @@ class MessageFactory(object):
           self.GetPrototype(extension.containing_type)
         extended_class = self._classes[extension.containing_type]
         extended_class.RegisterExtension(extension)
+        if extension.message_type:
+          self.GetPrototype(extension.message_type)
     return result
 
 

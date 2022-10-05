@@ -30,10 +30,10 @@
 
 #include <cstdint>
 
-#include <google/protobuf/parse_context.h>
 #include <google/protobuf/extension_set.h>
 #include <google/protobuf/generated_message_tctable_impl.h>
 #include <google/protobuf/message.h>
+#include <google/protobuf/parse_context.h>
 #include <google/protobuf/unknown_field_set.h>
 
 // clang-format off
@@ -44,7 +44,7 @@ namespace google {
 namespace protobuf {
 namespace internal {
 
-const char* TcParserBase::GenericFallback(PROTOBUF_TC_PARAM_DECL) {
+const char* TcParser::GenericFallback(PROTOBUF_TC_PARAM_DECL) {
   return GenericFallbackImpl<Message, UnknownFieldSet>(PROTOBUF_TC_PARAM_PASS);
 }
 

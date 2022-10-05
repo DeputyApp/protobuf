@@ -44,7 +44,6 @@
 
 #include <google/protobuf/stubs/logging.h>
 #include <google/protobuf/stubs/common.h>
-#include <google/protobuf/stubs/stringprintf.h>
 #include <google/protobuf/io/printer.h>
 #include <google/protobuf/io/zero_copy_stream.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
@@ -55,8 +54,9 @@
 #include <google/protobuf/map_field.h>
 #include <google/protobuf/message.h>
 #include <google/protobuf/text_format.h>
-#include <google/protobuf/util/field_comparator.h>
 #include <google/protobuf/stubs/strutil.h>
+#include <google/protobuf/stubs/stringprintf.h>
+#include <google/protobuf/util/field_comparator.h>
 
 // Always include as last one, otherwise it can break compilation
 #include <google/protobuf/port_def.inc>
@@ -65,6 +65,26 @@ namespace google {
 namespace protobuf {
 
 namespace util {
+
+namespace {
+
+std::string PrintShortTextFormat(const google::protobuf::Message& message) {
+  std::string debug_string;
+
+  google::protobuf::TextFormat::Printer printer;
+  printer.SetSingleLineMode(true);
+  printer.SetExpandAny(true);
+
+  printer.PrintToString(message, &debug_string);
+  // Single line mode currently might have an extra space at the end.
+  if (!debug_string.empty() && debug_string[debug_string.size() - 1] == ' ') {
+    debug_string.resize(debug_string.size() - 1);
+  }
+
+  return debug_string;
+}
+
+}  // namespace
 
 // A reporter to report the total number of diffs.
 // TODO(ykzhu): we can improve this to take into account the value differencers.
@@ -78,25 +98,28 @@ class NumDiffsReporter : public google::protobuf::util::MessageDifferencer::Repo
 
   // Report that a field has been added into Message2.
   void ReportAdded(
-      const google::protobuf::Message& message1, const google::protobuf::Message& message2,
+      const google::protobuf::Message& /* message1 */,
+      const google::protobuf::Message& /* message2 */,
       const std::vector<google::protobuf::util::MessageDifferencer::SpecificField>&
-          field_path) override {
+      /*field_path*/) override {
     ++num_diffs_;
   }
 
   // Report that a field has been deleted from Message1.
   void ReportDeleted(
-      const google::protobuf::Message& message1, const google::protobuf::Message& message2,
+      const google::protobuf::Message& /* message1 */,
+      const google::protobuf::Message& /* message2 */,
       const std::vector<google::protobuf::util::MessageDifferencer::SpecificField>&
-          field_path) override {
+      /*field_path*/) override {
     ++num_diffs_;
   }
 
   // Report that the value of a field has been modified.
   void ReportModified(
-      const google::protobuf::Message& message1, const google::protobuf::Message& message2,
+      const google::protobuf::Message& /* message1 */,
+      const google::protobuf::Message& /* message2 */,
       const std::vector<google::protobuf::util::MessageDifferencer::SpecificField>&
-          field_path) override {
+      /*field_path*/) override {
     ++num_diffs_;
   }
 
@@ -328,9 +351,14 @@ void MessageDifferencer::set_message_field_comparison(
   message_field_comparison_ = comparison;
 }
 
+MessageDifferencer::MessageFieldComparison
+MessageDifferencer::message_field_comparison() const {
+  return message_field_comparison_;
+}
+
 void MessageDifferencer::set_scope(Scope scope) { scope_ = scope; }
 
-MessageDifferencer::Scope MessageDifferencer::scope() { return scope_; }
+MessageDifferencer::Scope MessageDifferencer::scope() const { return scope_; }
 
 void MessageDifferencer::set_float_comparison(FloatComparison comparison) {
   default_field_comparator_.set_float_comparison(
@@ -344,7 +372,7 @@ void MessageDifferencer::set_repeated_field_comparison(
 }
 
 MessageDifferencer::RepeatedFieldComparison
-MessageDifferencer::repeated_field_comparison() {
+MessageDifferencer::repeated_field_comparison() const {
   return repeated_field_comparison_;
 }
 
@@ -2004,14 +2032,13 @@ void MessageDifferencer::StreamReporter::PrintValue(
       if (field->is_map() && message1_ != nullptr && message2_ != nullptr) {
         fd = field_message.GetDescriptor()->field(1);
         if (fd->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE) {
-          output = field_message.GetReflection()
-                       ->GetMessage(field_message, fd)
-                       .ShortDebugString();
+          output = PrintShortTextFormat(
+              field_message.GetReflection()->GetMessage(field_message, fd));
         } else {
           TextFormat::PrintFieldValueToString(field_message, fd, -1, &output);
         }
       } else {
-        output = field_message.ShortDebugString();
+        output = PrintShortTextFormat(field_message);
       }
       if (output.empty()) {
         printer_->Print("{ }");
@@ -2076,9 +2103,9 @@ void MessageDifferencer::StreamReporter::Print(const std::string& str) {
 void MessageDifferencer::StreamReporter::PrintMapKey(
     bool left_side, const SpecificField& specific_field) {
   if (message1_ == nullptr || message2_ == nullptr) {
-    GOOGLE_LOG(WARNING) << "PrintPath cannot log map keys; "
-                    "use SetMessages to provide the messages "
-                    "being compared prior to any processing.";
+    GOOGLE_LOG(INFO) << "PrintPath cannot log map keys; "
+                 "use SetMessages to provide the messages "
+                 "being compared prior to any processing.";
     return;
   }
 
@@ -2104,7 +2131,7 @@ void MessageDifferencer::StreamReporter::PrintMapKey(
 }
 
 void MessageDifferencer::StreamReporter::ReportAdded(
-    const Message& message1, const Message& message2,
+    const Message& /*message1*/, const Message& message2,
     const std::vector<SpecificField>& field_path) {
   printer_->Print("added: ");
   PrintPath(field_path, false);
@@ -2114,7 +2141,7 @@ void MessageDifferencer::StreamReporter::ReportAdded(
 }
 
 void MessageDifferencer::StreamReporter::ReportDeleted(
-    const Message& message1, const Message& message2,
+    const Message& message1, const Message& /*message2*/,
     const std::vector<SpecificField>& field_path) {
   printer_->Print("deleted: ");
   PrintPath(field_path, true);
@@ -2153,7 +2180,7 @@ void MessageDifferencer::StreamReporter::ReportModified(
 }
 
 void MessageDifferencer::StreamReporter::ReportMoved(
-    const Message& message1, const Message& message2,
+    const Message& message1, const Message& /*message2*/,
     const std::vector<SpecificField>& field_path) {
   printer_->Print("moved: ");
   PrintPath(field_path, true);
@@ -2165,7 +2192,7 @@ void MessageDifferencer::StreamReporter::ReportMoved(
 }
 
 void MessageDifferencer::StreamReporter::ReportMatched(
-    const Message& message1, const Message& message2,
+    const Message& message1, const Message& /*message2*/,
     const std::vector<SpecificField>& field_path) {
   printer_->Print("matched: ");
   PrintPath(field_path, true);
@@ -2179,7 +2206,7 @@ void MessageDifferencer::StreamReporter::ReportMatched(
 }
 
 void MessageDifferencer::StreamReporter::ReportIgnored(
-    const Message& message1, const Message& message2,
+    const Message& /*message1*/, const Message& /*message2*/,
     const std::vector<SpecificField>& field_path) {
   printer_->Print("ignored: ");
   PrintPath(field_path, true);
@@ -2197,7 +2224,7 @@ void MessageDifferencer::StreamReporter::SetMessages(const Message& message1,
 }
 
 void MessageDifferencer::StreamReporter::ReportUnknownFieldIgnored(
-    const Message& message1, const Message& message2,
+    const Message& /*message1*/, const Message& /*message2*/,
     const std::vector<SpecificField>& field_path) {
   printer_->Print("ignored: ");
   PrintPath(field_path, true);
